@@ -1,0 +1,938 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ROBI Graphics — AI SEO Image Renamer</title>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #07080d;
+  --bg2: #0d0f1a;
+  --surface: #111420;
+  --card: #161926;
+  --border: #1e2235;
+  --border2: #252840;
+  --accent: #5b6ef5;
+  --accent2: #7c8dff;
+  --accent-glow: rgba(91,110,245,0.18);
+  --gold: #f0b429;
+  --gold2: #ffd166;
+  --green: #10b981;
+  --red: #ef4444;
+  --text: #e8eaf5;
+  --text2: #9098b8;
+  --text3: #5a6080;
+  --claude: #d4733a;
+  --gemini: #4285f4;
+  --gpt: #10a37f;
+}
+
+html { scroll-behavior: smooth; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  min-height: 100vh;
+}
+body::before {
+  content: '';
+  position: fixed; inset: 0;
+  background:
+    radial-gradient(ellipse 80% 50% at 50% -10%, rgba(91,110,245,0.07) 0%, transparent 60%),
+    radial-gradient(ellipse 40% 30% at 90% 90%, rgba(240,180,41,0.04) 0%, transparent 50%);
+  pointer-events: none; z-index: 0;
+}
+body::after {
+  content: '';
+  position: fixed; inset: 0;
+  background-image: radial-gradient(circle, rgba(255,255,255,0.025) 1px, transparent 1px);
+  background-size: 32px 32px;
+  pointer-events: none; z-index: 0;
+}
+
+.app { position: relative; z-index: 1; max-width: 1080px; margin: 0 auto; padding: 0 20px 80px; }
+
+/* TOPBAR */
+.topbar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 22px 0 18px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 36px;
+  animation: fadeDown .5s ease both;
+}
+.brand { display: flex; align-items: center; gap: 12px; }
+.brand-icon {
+  width: 40px; height: 40px;
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  border-radius: 11px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 20px;
+  box-shadow: 0 0 24px var(--accent-glow);
+}
+.brand-name { font-size: 17px; font-weight: 800; letter-spacing: -.3px; }
+.brand-sub { font-size: 10px; color: var(--text3); font-weight: 600; letter-spacing: 1.5px; text-transform: uppercase; }
+.topbar-right { display: flex; align-items: center; gap: 8px; }
+.badge { background: var(--surface); border: 1px solid var(--border2); border-radius: 999px; padding: 5px 14px; font-size: 11px; color: var(--text3); font-family: 'JetBrains Mono', monospace; }
+.badge-accent { border-color: rgba(91,110,245,.3); color: var(--accent2); background: rgba(91,110,245,.06); }
+
+/* HERO */
+.hero { text-align: center; padding: 12px 0 40px; animation: fadeUp .6s .1s ease both; }
+.hero-tag {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: rgba(91,110,245,.08); border: 1px solid rgba(91,110,245,.2);
+  border-radius: 999px; padding: 5px 16px; font-size: 12px; color: var(--accent2);
+  font-weight: 600; margin-bottom: 18px; letter-spacing: .3px;
+}
+.hero h1 { font-size: clamp(28px,5vw,50px); font-weight: 800; letter-spacing: -1.5px; line-height: 1.1; margin-bottom: 12px; }
+.hero h1 .hl { background: linear-gradient(135deg, var(--accent2) 0%, #a78bfa 50%, var(--gold) 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+.hero p { color: var(--text2); font-size: 15px; font-weight: 400; max-width: 500px; margin: 0 auto; }
+
+/* PANELS */
+.panel { background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 22px; transition: border-color .2s; }
+.panel:hover { border-color: var(--border2); }
+.panel-title { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1.8px; color: var(--text3); display: flex; align-items: center; gap: 7px; margin-bottom: 16px; }
+.panel-title::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); flex-shrink: 0; }
+
+/* SETUP GRID */
+.setup-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px; animation: fadeUp .6s .15s ease both; }
+@media(max-width:680px) { .setup-grid { grid-template-columns: 1fr; } }
+
+/* AI TABS */
+.ai-tabs { display: flex; gap: 8px; margin-bottom: 14px; }
+.ai-tab {
+  flex: 1; background: var(--surface); border: 1.5px solid var(--border);
+  border-radius: 12px; padding: 12px 6px; cursor: pointer; text-align: center;
+  transition: all .2s; position: relative;
+}
+.ai-tab:hover { border-color: var(--border2); transform: translateY(-1px); }
+.ai-tab.ac { border-color: var(--claude) !important; background: rgba(212,115,58,.07); }
+.ai-tab.ag { border-color: var(--gemini) !important; background: rgba(66,133,244,.07); }
+.ai-tab.ao { border-color: var(--gpt) !important; background: rgba(16,163,127,.07); }
+.ai-tab-icon { font-size: 20px; margin-bottom: 3px; }
+.ai-tab-name { font-size: 11px; font-weight: 800; display: block; }
+.ai-tab-sub { font-size: 9px; color: var(--text3); font-family: 'JetBrains Mono', monospace; }
+
+.sel-field {
+  width: 100%; background: var(--surface); border: 1px solid var(--border2); border-radius: 10px;
+  padding: 10px 36px 10px 14px; color: var(--text); font-family: 'JetBrains Mono', monospace;
+  font-size: 11px; outline: none; cursor: pointer; transition: border-color .2s; appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%235a6080' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 12px center; margin-bottom: 10px;
+}
+.sel-field:focus { border-color: var(--accent); }
+
+.key-wrap { position: relative; }
+.key-inp {
+  width: 100%; background: var(--surface); border: 1px solid var(--border2); border-radius: 10px;
+  padding: 10px 86px 10px 14px; color: var(--text); font-family: 'JetBrains Mono', monospace;
+  font-size: 11px; outline: none; transition: border-color .2s;
+}
+.key-inp:focus { border-color: var(--accent); }
+.key-inp::placeholder { color: var(--text3); }
+.key-btn {
+  position: absolute; right: 5px; top: 50%; transform: translateY(-50%);
+  background: var(--accent); border: none; border-radius: 7px; padding: 5px 13px;
+  color: #fff; font-size: 11px; font-weight: 700; cursor: pointer; transition: opacity .2s; white-space:nowrap;
+}
+.key-btn:hover { opacity: .85; }
+.key-st { font-size: 10px; margin-top: 6px; font-family: 'JetBrains Mono', monospace; }
+.kok { color: var(--green); } .kerr { color: var(--red); }
+
+/* PRICING */
+.price-panel { background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 22px; margin-bottom: 14px; animation: fadeUp .6s .18s ease both; }
+.model-cards { display: grid; grid-template-columns: repeat(3,1fr); gap: 12px; }
+@media(max-width:680px) { .model-cards { grid-template-columns: 1fr; } }
+.mc {
+  background: var(--surface); border: 1.5px solid var(--border);
+  border-radius: 12px; padding: 14px; transition: border-color .2s;
+}
+.mc.c { border-color: rgba(212,115,58,.2); }
+.mc.g { border-color: rgba(66,133,244,.2); }
+.mc.o { border-color: rgba(16,163,127,.2); }
+.mc-head { display: flex; align-items: center; gap: 9px; margin-bottom: 12px; }
+.mc-ico { font-size: 22px; }
+.mc-name { font-size: 13px; font-weight: 800; }
+.mc-prov { font-size: 9px; color: var(--text3); letter-spacing: .5px; }
+.mc-rows { display: flex; flex-direction: column; gap: 7px; }
+.mc-row { display: flex; justify-content: space-between; align-items: flex-start; }
+.mc-model { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--text2); }
+.mc-note { font-size: 9px; font-weight: 700; }
+.n-best { color: var(--gold); } .n-rec { color: var(--green); } .n-cheap { color: var(--accent2); }
+.mc-price { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--gold); text-align: right; }
+.mc-price small { display: block; font-size: 8px; color: var(--text3); }
+
+/* UPLOAD */
+.upload-zone {
+  border: 2px dashed var(--border2); border-radius: 16px;
+  background: var(--card); padding: 52px 24px; text-align: center;
+  cursor: pointer; transition: all .3s; position: relative; overflow: hidden;
+  animation: fadeUp .6s .2s ease both;
+}
+.upload-zone::before { content: ''; position: absolute; inset: 0; background: radial-gradient(circle at center, rgba(91,110,245,.05) 0%, transparent 70%); opacity: 0; transition: opacity .3s; }
+.upload-zone:hover, .upload-zone.drag { border-color: var(--accent); }
+.upload-zone:hover::before, .upload-zone.drag::before { opacity: 1; }
+.up-ico { font-size: 46px; margin-bottom: 14px; display: block; animation: float 3s ease-in-out infinite; }
+.up-ttl { font-size: 20px; font-weight: 800; letter-spacing: -.3px; margin-bottom: 6px; }
+.up-desc { color: var(--text2); font-size: 14px; margin-bottom: 18px; }
+.up-fmts { display: flex; gap: 6px; justify-content: center; flex-wrap: wrap; }
+.fmt { background: var(--surface); border: 1px solid var(--border2); border-radius: 6px; padding: 3px 10px; font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--text3); }
+#fileIn { display: none; }
+
+/* STATS */
+.stats { display: flex; gap: 8px; margin: 12px 0; flex-wrap: wrap; }
+.stat { background: var(--card); border: 1px solid var(--border); border-radius: 999px; padding: 6px 16px; font-size: 12px; display: flex; align-items: center; gap: 5px; color: var(--text2); }
+.stat strong { color: var(--text); font-weight: 700; }
+
+/* ACTIONS */
+.actions { display: flex; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
+.btn { display: inline-flex; align-items: center; gap: 8px; border: none; border-radius: 12px; padding: 13px 22px; font-family: 'Plus Jakarta Sans', sans-serif; font-weight: 700; font-size: 13px; cursor: pointer; transition: all .2s; white-space: nowrap; }
+.btn:disabled { opacity: .35; cursor: not-allowed !important; transform: none !important; box-shadow: none !important; }
+.btn-run { background: linear-gradient(135deg, var(--accent), #7c5fe6); color: #fff; box-shadow: 0 4px 20px rgba(91,110,245,.28); }
+.btn-run:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 8px 28px rgba(91,110,245,.4); }
+.btn-zip { background: linear-gradient(135deg, var(--green), #34d399); color: #fff; box-shadow: 0 4px 16px rgba(16,185,129,.22); display: none; }
+.btn-zip.show { display: inline-flex; }
+.btn-zip:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(16,185,129,.32); }
+.btn-clear { background: var(--surface); border: 1px solid var(--border2); color: var(--text2); }
+.btn-clear:hover:not(:disabled) { border-color: var(--red); color: var(--red); }
+
+/* PROGRESS */
+.prog { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 18px 22px; margin-bottom: 14px; display: none; }
+.prog.show { display: block; }
+.prog-top { display: flex; justify-content: space-between; margin-bottom: 10px; }
+.prog-lbl { font-size: 13px; font-weight: 600; }
+.prog-cnt { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--accent2); }
+.prog-track { height: 5px; background: var(--surface); border-radius: 999px; overflow: hidden; }
+.prog-fill { height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--accent), var(--accent2), #a78bfa); background-size: 200%; animation: shimmer 2s linear infinite; transition: width .4s ease; width: 0%; }
+
+/* IMAGE GRID */
+.img-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px,1fr)); gap: 13px; }
+.img-card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; overflow: hidden; animation: popIn .35s ease both; transition: transform .2s, border-color .2s; position: relative; }
+.img-card:hover { transform: translateY(-2px); }
+.img-card.sdone { border-color: rgba(16,185,129,.35); }
+.img-card.sproc { border-color: rgba(91,110,245,.4); }
+.img-card.serr  { border-color: rgba(239,68,68,.3); }
+.card-img { width: 100%; height: 148px; object-fit: cover; display: block; background: var(--surface); }
+.cbadge { position: absolute; top: 8px; right: 8px; border-radius: 6px; padding: 3px 8px; font-size: 9px; font-weight: 800; letter-spacing: .5px; }
+.bwait { background: rgba(20,22,38,.85); color: var(--text3); border: 1px solid var(--border2); }
+.bdone { background: rgba(16,185,129,.88); color: #fff; }
+.bproc { background: rgba(91,110,245,.88); color: #fff; }
+.berr  { background: rgba(239,68,68,.88);  color: #fff; }
+.card-body { padding: 12px 14px 14px; }
+.c-old { font-family: 'JetBrains Mono', monospace; font-size: 9px; color: var(--text3); margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.c-arrow { font-size: 10px; color: var(--text3); margin: 3px 0; display: none; }
+.c-arrow.v { display: block; }
+.c-new { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--accent2); word-break: break-all; line-height: 1.5; background: rgba(91,110,245,.06); border-radius: 6px; padding: 6px 8px; margin-top: 4px; display: none; }
+.c-new.v { display: block; }
+.c-msg { font-size: 10px; color: var(--text2); margin-top: 4px; }
+
+/* TOAST */
+.toast { position: fixed; bottom: 24px; right: 24px; background: var(--card); border: 1px solid var(--border2); border-radius: 12px; padding: 13px 18px; font-size: 13px; z-index: 9999; transform: translateY(60px); opacity: 0; transition: all .3s; max-width: 300px; box-shadow: 0 8px 32px rgba(0,0,0,.4); }
+.toast.on { transform: translateY(0); opacity: 1; }
+.tok  { border-color: rgba(16,185,129,.4); }
+.terr { border-color: rgba(239,68,68,.4); }
+
+.hidden { display: none !important; }
+
+/* ANIMS */
+@keyframes fadeDown { from{opacity:0;transform:translateY(-16px)} to{opacity:1;transform:none} }
+@keyframes fadeUp   { from{opacity:0;transform:translateY(16px)}  to{opacity:1;transform:none} }
+@keyframes popIn    { from{opacity:0;transform:scale(.93)} to{opacity:1;transform:scale(1)} }
+@keyframes float    { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-8px)} }
+@keyframes spin     { to{transform:rotate(360deg)} }
+@keyframes shimmer  { 0%{background-position:100% 0} 100%{background-position:-100% 0} }
+
+.spin { display:inline-block; width:13px; height:13px; border:2px solid rgba(255,255,255,.3); border-top-color:#fff; border-radius:50%; animation:spin .7s linear infinite; }
+</style>
+</head>
+<body>
+<div class="app">
+
+<!-- TOPBAR -->
+<div class="topbar">
+  <div class="brand">
+    <div class="brand-icon">🎨</div>
+    <div>
+      <div class="brand-name">ROBI Graphics</div>
+      <div class="brand-sub">AI SEO Image Renamer</div>
+    </div>
+  </div>
+  <div class="topbar-right">
+    <div class="badge">v2.1</div>
+    <div class="badge badge-accent">Multi-AI</div>
+  </div>
+</div>
+
+<!-- HERO -->
+<div class="hero">
+  <div class="hero-tag">⚡ Claude · Gemini · ChatGPT</div>
+  <h1>AI <span class="hl">SEO Image</span> Renamer</h1>
+  <p>ছবি আপলোড করুন — AI নিজেই দেখে SEO নাম দেবে, পুরনো নাম মুছে নতুন নাম বসবে, সব নিয়ে ZIP হবে।</p>
+</div>
+
+<!-- SETUP -->
+<div class="setup-grid">
+  <!-- AI PICK -->
+  <div class="panel">
+    <div class="panel-title">AI Model বেছে নিন</div>
+    <div class="ai-tabs">
+      <div class="ai-tab ac" id="tc" onclick="selAI('claude')">
+        <div class="ai-tab-icon">🟠</div>
+        <span class="ai-tab-name" style="color:#d4733a">Claude</span>
+        <span class="ai-tab-sub">Anthropic</span>
+      </div>
+      <div class="ai-tab" id="tg" onclick="selAI('gemini')">
+        <div class="ai-tab-icon">🔵</div>
+        <span class="ai-tab-name" style="color:#4285f4">Gemini</span>
+        <span class="ai-tab-sub">Google</span>
+      </div>
+      <div class="ai-tab" id="to" onclick="selAI('gpt')">
+        <div class="ai-tab-icon">🟢</div>
+        <span class="ai-tab-name" style="color:#10a37f">ChatGPT</span>
+        <span class="ai-tab-sub">OpenAI</span>
+      </div>
+    </div>
+    <select class="sel-field" id="modelSel"></select>
+  </div>
+
+  <!-- KEY -->
+  <div class="panel">
+    <div class="panel-title">API Key</div>
+    <div class="key-wrap">
+      <input type="password" class="key-inp" id="keyInp" placeholder="sk-ant-api03-...">
+      <button class="key-btn" onclick="saveKey()">Save</button>
+    </div>
+    <div class="key-st" id="keySt"></div>
+    <div style="height:10px"></div>
+    <div class="key-wrap">
+      <input type="password" class="key-inp" id="keyInp2" placeholder="Backup API key (optional)">
+    </div>
+    <div style="height:6px"></div>
+    <div style="font-size:10px;color:var(--text3)">💡 Backup key rate limit এড়াতে ব্যবহার হবে</div>
+  </div>
+</div>
+
+<!-- PRICING -->
+<div class="price-panel">
+  <div class="panel-title">API Model Pricing — Input / Output (per 1M tokens)</div>
+  <div class="model-cards">
+    <!-- Claude -->
+    <div class="mc c">
+      <div class="mc-head">
+        <div class="mc-ico">🟠</div>
+        <div><div class="mc-name" style="color:#d4733a">Claude</div><div class="mc-prov">ANTHROPIC</div></div>
+      </div>
+      <div class="mc-rows">
+        <div class="mc-row">
+          <div><div class="mc-model">claude-opus-4</div><div class="mc-note n-best">🆕 Latest Opus</div></div>
+          <div class="mc-price">$15/$75<small>input/output</small></div>
+        </div>
+        <div class="mc-row">
+          <div><div class="mc-model">claude-sonnet-4</div><div class="mc-note n-best">🆕 Latest Sonnet</div></div>
+          <div class="mc-price">$3/$15<small>input/output</small></div>
+        </div>
+        <div class="mc-row">
+          <div><div class="mc-model">claude-opus-4-5</div><div class="mc-note n-rec">★ Most Powerful</div></div>
+          <div class="mc-price">$15/$75<small>input/output</small></div>
+        </div>
+        <div class="mc-row">
+          <div><div class="mc-model">claude-sonnet-4-5</div><div class="mc-note n-rec">✓ Recommended</div></div>
+          <div class="mc-price">$3/$15<small>input/output</small></div>
+        </div>
+        <div class="mc-row">
+          <div><div class="mc-model">claude-haiku-4-5</div><div class="mc-note n-cheap">⚡ Fastest</div></div>
+          <div class="mc-price">$0.8/$4<small>input/output</small></div>
+        </div>
+      </div>
+    </div>
+    <!-- Gemini -->
+    <div class="mc g">
+      <div class="mc-head">
+        <div class="mc-ico">🔵</div>
+        <div><div class="mc-name" style="color:#4285f4">Gemini</div><div class="mc-prov">GOOGLE AI</div></div>
+      </div>
+      <div class="mc-rows">
+        <div class="mc-row">
+          <div><div class="mc-model">gemini-3.1-flash-lite</div><div class="mc-note n-best">🆕 Newest FREE</div></div>
+          <div class="mc-price" style="color:var(--green)">FREE<small>input/output</small></div>
+        </div>
+        <div class="mc-row">
+          <div><div class="mc-model">gemini-3-flash</div><div class="mc-note n-best">🆕 Fast FREE</div></div>
+          <div class="mc-price" style="color:var(--green)">FREE<small>input/output</small></div>
+        </div>
+        <div class="mc-row">
+          <div><div class="mc-model">gemini-3.1-pro</div><div class="mc-note n-rec">★ Most Capable</div></div>
+          <div class="mc-price">PAID<small>input/output</small></div>
+        </div>
+        <div class="mc-row">
+          <div><div class="mc-model">gemini-2.5-pro</div><div class="mc-note n-rec">✓ Capable FREE</div></div>
+          <div class="mc-price" style="color:var(--green)">FREE<small>input/output</small></div>
+        </div>
+        <div class="mc-row">
+          <div><div class="mc-model">gemini-2.5-flash</div><div class="mc-note n-rec">✓ Recommended FREE</div></div>
+          <div class="mc-price" style="color:var(--green)">FREE<small>input/output</small></div>
+        </div>
+        <div class="mc-row">
+          <div><div class="mc-model">gemini-2.5-flash-lite</div><div class="mc-note n-cheap">⚡ Light FREE</div></div>
+          <div class="mc-price" style="color:var(--green)">FREE<small>input/output</small></div>
+        </div>
+        <div class="mc-row">
+          <div><div class="mc-model">gemini-2.0-flash</div><div class="mc-note" style="color:var(--text3)">PAID</div></div>
+          <div class="mc-price">$0.1/$0.4<small>input/output</small></div>
+        </div>
+        <div class="mc-row">
+          <div><div class="mc-model">gemini-1.5-pro</div><div class="mc-note n-cheap">FREE</div></div>
+          <div class="mc-price" style="color:var(--green)">FREE<small>input/output</small></div>
+        </div>
+        <div class="mc-row">
+          <div><div class="mc-model">gemini-1.5-flash</div><div class="mc-note n-cheap">FREE</div></div>
+          <div class="mc-price" style="color:var(--green)">FREE<small>input/output</small></div>
+        </div>
+        <div class="mc-row">
+          <div><div class="mc-model">gemini-1.5-flash-8b</div><div class="mc-note n-cheap">⚡ Budget FREE</div></div>
+          <div class="mc-price" style="color:var(--green)">FREE<small>input/output</small></div>
+        </div>
+      </div>
+    </div>
+    <!-- GPT -->
+    <div class="mc o">
+      <div class="mc-head">
+        <div class="mc-ico">🟢</div>
+        <div><div class="mc-name" style="color:#10a37f">ChatGPT</div><div class="mc-prov">OPENAI</div></div>
+      </div>
+      <div class="mc-rows">
+        <div class="mc-row">
+          <div><div class="mc-model">gpt-4.1</div><div class="mc-note n-best">🆕 Latest Best</div></div>
+          <div class="mc-price">$2/$8<small>input/output</small></div>
+        </div>
+        <div class="mc-row">
+          <div><div class="mc-model">gpt-4.1-mini</div><div class="mc-note n-best">🆕 Recommended</div></div>
+          <div class="mc-price">$0.4/$1.6<small>input/output</small></div>
+        </div>
+        <div class="mc-row">
+          <div><div class="mc-model">gpt-4o</div><div class="mc-note n-rec">★ Best Vision</div></div>
+          <div class="mc-price">$2.5/$10<small>input/output</small></div>
+        </div>
+        <div class="mc-row">
+          <div><div class="mc-model">gpt-4o-mini</div><div class="mc-note n-cheap">⚡ Budget</div></div>
+          <div class="mc-price">$0.15/$0.6<small>input/output</small></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- UPLOAD -->
+<div class="upload-zone" id="uz" onclick="document.getElementById('fileIn').click()">
+  <div id="uzEmpty">
+    <span class="up-ico">🖼️</span>
+    <div class="up-ttl">ছবি Drop করুন বা Click করুন</div>
+    <div class="up-desc">একসাথে যেকোনো সংখ্যক ছবি আপলোড করুন</div>
+    <div class="up-fmts">
+      <span class="fmt">PNG</span><span class="fmt">JPG</span><span class="fmt">JPEG</span>
+      <span class="fmt">WEBP</span><span class="fmt">GIF</span><span class="fmt">BMP</span>
+    </div>
+  </div>
+  <div id="uzPrev" style="display:none;width:100%;text-align:left;" onclick="event.stopPropagation()">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+      <div style="font-size:13px;font-weight:700;color:var(--text2)">📁 <span id="prevCount">0</span>টি ছবি লোড হয়েছে</div>
+      <button onclick="document.getElementById('fileIn').click()" style="background:var(--accent);border:none;border-radius:8px;padding:5px 14px;color:#fff;font-size:11px;font-weight:700;cursor:pointer;">+ আরো যোগ করুন</button>
+    </div>
+    <div id="prevStrip" style="display:flex;flex-wrap:wrap;gap:8px;max-height:220px;overflow-y:auto;padding-right:4px;"></div>
+  </div>
+</div>
+<input type="file" id="fileIn" multiple accept="image/*">
+
+<!-- STATS -->
+<div class="stats hidden" id="statsEl">
+  <div class="stat">📁 মোট <strong id="cT">0</strong></div>
+  <div class="stat">✅ সম্পন্ন <strong id="cD">0</strong></div>
+  <div class="stat">⏳ বাকি <strong id="cP">0</strong></div>
+  <div class="stat">❌ Error <strong id="cE">0</strong></div>
+</div>
+
+<!-- ACTIONS -->
+<div class="actions hidden" id="actsEl">
+  <button class="btn btn-run" id="btnRun" onclick="runAll()">✨ AI দিয়ে নাম তৈরি করুন</button>
+  <button class="btn btn-zip" id="btnZip" onclick="makeZip()">📦 ROBI_Graphics_Renamed_Images.zip</button>
+  <button class="btn btn-clear" onclick="clearAll()">🗑️ সব মুছুন</button>
+</div>
+
+<!-- PROGRESS -->
+<div class="prog" id="progEl">
+  <div class="prog-top">
+    <span class="prog-lbl" id="progLbl">Processing...</span>
+    <span class="prog-cnt" id="progCnt">0/0</span>
+  </div>
+  <div class="prog-track"><div class="prog-fill" id="progFill"></div></div>
+</div>
+
+<!-- GRID -->
+<div class="img-grid" id="imgGrid"></div>
+
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+// ═══════════════════════════════════════════
+// CONFIG
+// ═══════════════════════════════════════════
+const CFG = {
+  claude: {
+    models: [
+      { id:'claude-opus-4-5',           label:'claude-opus-4-5   · $15/$75  ★ Most Powerful' },
+      { id:'claude-sonnet-4-5',         label:'claude-sonnet-4-5 · $3/$15   ✓ Recommended' },
+      { id:'claude-haiku-4-5-20251001', label:'claude-haiku-4-5  · $0.8/$4  ⚡ Fastest' },
+      { id:'claude-opus-4-20250514',    label:'claude-opus-4     · $15/$75  🆕 Latest Opus' },
+      { id:'claude-sonnet-4-20250514',  label:'claude-sonnet-4   · $3/$15   🆕 Latest Sonnet' },
+    ],
+    def: 'claude-sonnet-4-5',
+    hint: 'sk-ant-api03-...',
+  },
+  gemini: {
+    models: [
+      { id:'gemini-3.1-flash-lite-preview', label:'gemini-3.1-flash-lite · FREE 🆕 Newest' },
+      { id:'gemini-3-flash',                label:'gemini-3-flash         · FREE 🆕 Fast' },
+      { id:'gemini-3.1-pro-preview',        label:'gemini-3.1-pro         · PAID ★ Pro' },
+      { id:'gemini-2.5-pro',                label:'gemini-2.5-pro         · FREE ✓ Capable' },
+      { id:'gemini-2.5-flash-preview-05-20',label:'gemini-2.5-flash       · FREE ✓ Recommended' },
+      { id:'gemini-2.5-flash-lite-preview', label:'gemini-2.5-flash-lite  · FREE ⚡ Light' },
+      { id:'gemini-2.0-flash',              label:'gemini-2.0-flash       · PAID' },
+      { id:'gemini-1.5-pro',               label:'gemini-1.5-pro          · FREE' },
+      { id:'gemini-1.5-flash',             label:'gemini-1.5-flash        · FREE' },
+      { id:'gemini-1.5-flash-8b',          label:'gemini-1.5-flash-8b     · FREE ⚡ Budget' },
+    ],
+    def: 'gemini-2.5-flash-preview-05-20',
+    hint: 'AIzaSy...',
+  },
+  gpt: {
+    models: [
+      { id:'gpt-4.1',         label:'gpt-4.1       · $2/$8     🆕 Latest Best' },
+      { id:'gpt-4.1-mini',    label:'gpt-4.1-mini  · $0.4/$1.6  🆕 Recommended' },
+      { id:'gpt-4o',          label:'gpt-4o        · $2.5/$10  ★ Best Vision' },
+      { id:'gpt-4o-mini',     label:'gpt-4o-mini   · $0.15/$0.6 ✓ Budget' },
+      { id:'gpt-4-turbo',     label:'gpt-4-turbo   · $10/$30   ⚡ High Quality' },
+    ],
+    def: 'gpt-4.1-mini',
+    hint: 'sk-...',
+  },
+};
+
+const PROMPT = `You are a world-class stock marketplace SEO expert and visual analyst.
+
+Analyze this image carefully and generate a perfect SEO-optimized filename for stock marketplaces (Shutterstock, Adobe Stock, Freepik, PNGTree).
+
+ANALYZE:
+→ Main subject (lantern, mosque, flower, person, food, pattern, etc.)
+→ Art style (3d-render, flat-design, watercolor, silhouette, realistic, illustration, minimal, cartoon)
+→ Color palette (golden, blue, pastel, dark, vibrant, monochrome)
+→ Cultural/seasonal theme (eid, ramadan, islamic, christmas, diwali, new-year)
+→ File context (transparent, png, background, banner, poster, icon, template)
+→ Mood (luxury, festive, modern, elegant, minimal, bold, playful)
+
+FILENAME RULES:
+- Lowercase only, hyphens between words
+- 6-10 words total
+- Structure: [style]-[subject]-[theme]-[type]-[descriptor]
+- Use high-search-volume stock keywords
+- NO generic words: image, file, photo, picture, final, design1
+
+RETURN: Only the filename. No extension. No explanation. No quotes. Just the hyphenated name.`;
+
+// ═══════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════
+let curAI = 'claude';
+let files = [];
+let results = {};
+
+// ═══════════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════════
+selAI('claude');
+
+const uz = document.getElementById('uz');
+uz.addEventListener('dragover', e => { e.preventDefault(); uz.classList.add('drag'); });
+uz.addEventListener('dragleave', () => uz.classList.remove('drag'));
+uz.addEventListener('drop', e => {
+  e.preventDefault(); uz.classList.remove('drag');
+  addFiles([...e.dataTransfer.files].filter(f => f.type.startsWith('image/')));
+});
+document.getElementById('fileIn').addEventListener('change', e => {
+  addFiles([...e.target.files]); e.target.value='';
+});
+
+// ═══════════════════════════════════════════
+// AI SWITCH
+// ═══════════════════════════════════════════
+function selAI(ai) {
+  curAI = ai;
+  document.getElementById('tc').className = 'ai-tab' + (ai==='claude'  ? ' ac' : '');
+  document.getElementById('tg').className = 'ai-tab' + (ai==='gemini'  ? ' ag' : '');
+  document.getElementById('to').className = 'ai-tab' + (ai==='gpt'     ? ' ao' : '');
+
+  const cfg = CFG[ai];
+  const sel = document.getElementById('modelSel');
+  sel.innerHTML = cfg.models.map(m=>`<option value="${m.id}">${m.label}</option>`).join('');
+  sel.value = cfg.def;
+
+  const ki = document.getElementById('keyInp');
+  ki.placeholder = cfg.hint;
+  const saved = localStorage.getItem('rk_'+ai);
+  ki.value = saved || '';
+  const st = document.getElementById('keySt');
+  if (saved) { st.textContent='✓ Saved key লোড হয়েছে'; st.className='key-st kok'; }
+  else { st.textContent=''; st.className='key-st'; }
+}
+
+function saveKey() {
+  const k = document.getElementById('keyInp').value.trim();
+  if (!k) { showKErr('Key খালি!'); return; }
+  localStorage.setItem('rk_'+curAI, k);
+  const st=document.getElementById('keySt');
+  st.textContent='✓ Key সেভ হয়েছে'; st.className='key-st kok';
+  toast('✓ Key সেভ হয়েছে','ok');
+}
+function showKErr(m) {
+  const st=document.getElementById('keySt');
+  st.textContent='✗ '+m; st.className='key-st kerr';
+}
+
+// ═══════════════════════════════════════════
+// FILES
+// ═══════════════════════════════════════════
+function addFiles(nf) {
+  if (!nf.length) return;
+  files=[...files,...nf];
+  renderGrid(); updateStats();
+  renderPreviews();
+  document.getElementById('statsEl').classList.remove('hidden');
+  document.getElementById('actsEl').classList.remove('hidden');
+}
+
+function renderPreviews() {
+  const strip = document.getElementById('prevStrip');
+  const empty = document.getElementById('uzEmpty');
+  const prev  = document.getElementById('uzPrev');
+  document.getElementById('prevCount').textContent = files.length;
+
+  if (files.length === 0) {
+    empty.style.display = ''; prev.style.display = 'none'; return;
+  }
+  empty.style.display = 'none'; prev.style.display = '';
+  strip.innerHTML = '';
+  files.forEach((f, i) => {
+    const url = URL.createObjectURL(f);
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'position:relative;width:80px;height:80px;border-radius:10px;overflow:hidden;border:1.5px solid var(--border2);flex-shrink:0;';
+    wrap.innerHTML = `
+      <img src="${url}" style="width:100%;height:100%;object-fit:cover;display:block;" alt="">
+      <button onclick="removeFile(${i})" style="position:absolute;top:3px;right:3px;width:18px;height:18px;border-radius:50%;background:rgba(0,0,0,.75);border:none;color:#fff;font-size:11px;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1;">✕</button>
+      <div style="position:absolute;bottom:0;left:0;right:0;background:rgba(0,0,0,.6);font-size:8px;color:#fff;padding:2px 4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${f.name}</div>
+    `;
+    strip.appendChild(wrap);
+  });
+}
+
+function removeFile(idx) {
+  files.splice(idx, 1);
+  delete results[idx];
+  // re-index results
+  const newRes = {};
+  Object.keys(results).forEach(k => {
+    const ki = parseInt(k);
+    if (ki > idx) newRes[ki-1] = results[k];
+    else if (ki < idx) newRes[ki] = results[k];
+  });
+  results = newRes;
+  renderGrid(); renderPreviews(); updateStats();
+  if (!files.length) {
+    document.getElementById('statsEl').classList.add('hidden');
+    document.getElementById('actsEl').classList.add('hidden');
+  }
+}
+
+function renderGrid() {
+  const g=document.getElementById('imgGrid'); g.innerHTML='';
+  files.forEach((f,i)=>{
+    const url=URL.createObjectURL(f);
+    const d=document.createElement('div');
+    d.className='img-card'; d.id='card-'+i;
+    d.innerHTML=`
+      <img src="${url}" class="card-img" alt="">
+      <div class="cbadge bwait" id="badge-${i}">WAIT</div>
+      <div class="card-body">
+        <div class="c-old" title="${f.name}">📄 ${f.name}</div>
+        <div class="c-arrow" id="arr-${i}">↓ নতুন নাম</div>
+        <div class="c-new" id="cnew-${i}"></div>
+        <div class="c-msg" id="cmsg-${i}"></div>
+      </div>`;
+    g.appendChild(d);
+  });
+}
+
+function clearAll() {
+  files=[]; results={};
+  document.getElementById('imgGrid').innerHTML='';
+  document.getElementById('statsEl').classList.add('hidden');
+  document.getElementById('actsEl').classList.add('hidden');
+  document.getElementById('progEl').classList.remove('show');
+  document.getElementById('btnZip').classList.remove('show');
+  renderPreviews();
+  updateStats();
+}
+
+function updateStats() {
+  const done=Object.values(results).filter(r=>!r.err).length;
+  const err =Object.values(results).filter(r=> r.err).length;
+  document.getElementById('cT').textContent=files.length;
+  document.getElementById('cD').textContent=done;
+  document.getElementById('cP').textContent=files.length-Object.keys(results).length;
+  document.getElementById('cE').textContent=err;
+}
+
+// ═══════════════════════════════════════════
+// B64
+// ═══════════════════════════════════════════
+function toB64(file) {
+  return new Promise((ok,err)=>{
+    const r=new FileReader();
+    r.onload=()=>ok(r.result.split(',')[1]);
+    r.onerror=err; r.readAsDataURL(file);
+  });
+}
+
+// ═══════════════════════════════════════════
+// API CALLERS
+// ═══════════════════════════════════════════
+async function callClaude(file,model,key) {
+  const b64=await toB64(file);
+  const r=await fetch('https://api.anthropic.com/v1/messages',{
+    method:'POST',
+    headers:{'Content-Type':'application/json','x-api-key':key,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
+    body:JSON.stringify({model,max_tokens:80,messages:[{role:'user',content:[
+      {type:'image',source:{type:'base64',media_type:file.type||'image/jpeg',data:b64}},
+      {type:'text',text:PROMPT}
+    ]}]})
+  });
+  if(!r.ok){const e=await r.json();throw new Error(e?.error?.message||'Claude Error');}
+  const d=await r.json(); return d.content?.[0]?.text?.trim()||'';
+}
+
+async function callGemini(file,model,key) {
+  const b64=await toB64(file); const mime=file.type||'image/jpeg';
+  const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({contents:[{parts:[{inline_data:{mime_type:mime,data:b64}},{text:PROMPT}]}],generationConfig:{maxOutputTokens:80,temperature:0.4}})
+  });
+  if(!r.ok){const e=await r.json();throw new Error(e?.error?.message||'Gemini Error');}
+  const d=await r.json(); return d.candidates?.[0]?.content?.parts?.[0]?.text?.trim()||'';
+}
+
+async function callGPT(file,model,key) {
+  const b64=await toB64(file); const mime=file.type||'image/jpeg';
+  const r=await fetch('https://api.openai.com/v1/chat/completions',{
+    method:'POST',
+    headers:{'Content-Type':'application/json','Authorization':'Bearer '+key},
+    body:JSON.stringify({model,max_tokens:80,messages:[{role:'user',content:[
+      {type:'image_url',image_url:{url:`data:${mime};base64,${b64}`}},
+      {type:'text',text:PROMPT}
+    ]}]})
+  });
+  if(!r.ok){const e=await r.json();throw new Error(e?.error?.message||'OpenAI Error');}
+  const d=await r.json(); return d.choices?.[0]?.message?.content?.trim()||'';
+}
+
+async function callAI(file) {
+  const key=localStorage.getItem('rk_'+curAI)||document.getElementById('keyInp').value.trim();
+  const model=document.getElementById('modelSel').value;
+  if(!key) throw new Error('API key দিন!');
+  if(curAI==='claude') return callClaude(file,model,key);
+  if(curAI==='gemini') return callGemini(file,model,key);
+  if(curAI==='gpt')    return callGPT(file,model,key);
+}
+
+// ═══════════════════════════════════════════
+// CLEAN NAME + DEDUP
+// ═══════════════════════════════════════════
+function cleanName(raw,file,idx) {
+  let n=(raw||'').toLowerCase().replace(/[^a-z0-9\-]/g,'-').replace(/-+/g,'-').replace(/^-|-$/g,'');
+  if(!n||n.length<3) n='stock-image-seo-'+idx;
+  const ext=file.name.split('.').pop().toLowerCase();
+  const used=Object.values(results).map(r=>r.newName);
+  let fn=n,c=1;
+  while(used.includes(fn+'.'+ext)) fn=n+'-'+(c++);
+  return fn+'.'+ext;
+}
+
+// ═══════════════════════════════════════════
+// RETRY WRAPPER
+// ═══════════════════════════════════════════
+async function callAIWithRetry(file, maxRetry=3) {
+  let lastErr;
+  for(let attempt=1; attempt<=maxRetry; attempt++){
+    try {
+      return await callAI(file);
+    } catch(e) {
+      lastErr = e;
+      const msg = e.message||'';
+      const isRetryable = /overload|high demand|503|529|rate.?limit|quota|capacity/i.test(msg);
+      if(isRetryable && attempt < maxRetry){
+        const wait = attempt * 3000;
+        toast(`⏳ Server busy, ${attempt}/${maxRetry} retry... ${wait/1000}s পরে`, 'err');
+        await new Promise(r=>setTimeout(r, wait));
+      } else {
+        throw e;
+      }
+    }
+  }
+  throw lastErr;
+}
+
+// ═══════════════════════════════════════════
+// RUN ALL  (শুধু ERR/pending গুলো process করে)
+// ═══════════════════════════════════════════
+async function runAll() {
+  const key=localStorage.getItem('rk_'+curAI)||document.getElementById('keyInp').value.trim();
+  if(!key){toast('❌ API key দিন!','err');return;}
+  if(!files.length){toast('❌ ছবি আপলোড করুন!','err');return;}
+
+  const btn=document.getElementById('btnRun');
+  btn.disabled=true; btn.innerHTML='<span class="spin"></span> Processing...';
+  document.getElementById('progEl').classList.add('show');
+  document.getElementById('btnZip').classList.remove('show');
+
+  // শুধু যেগুলো এখনো ERR বা pending সেগুলো করবো
+  const pending = files.map((_,i)=>i).filter(i => !results[i] || results[i].err);
+
+  // DONE কার্ডগুলো লুকাও, ERR গুলো উপরে আনো
+  reorderGrid(pending);
+
+  let done=0; const total=pending.length;
+  if(total===0){
+    toast('✅ সব ছবি আগেই সম্পন্ন!','ok');
+    btn.disabled=false; btn.innerHTML='✨ আবার Run করুন';
+    document.getElementById('btnZip').classList.add('show');
+    return;
+  }
+
+  document.getElementById('progFill').style.width='0%';
+  document.getElementById('progCnt').textContent=`0/${total}`;
+
+  for(let pi=0; pi<pending.length; pi++){
+    const i=pending[pi];
+    const f=files[i];
+    const card=document.getElementById('card-'+i);
+    const badge=document.getElementById('badge-'+i);
+    const newEl=document.getElementById('cnew-'+i);
+    const arrEl=document.getElementById('arr-'+i);
+    const msgEl=document.getElementById('cmsg-'+i);
+
+    if(card) {
+      card.className='img-card sproc';
+      badge.className='cbadge bproc'; badge.textContent='AI...';
+      msgEl.textContent='বিশ্লেষণ করছে...'; msgEl.style.color='';
+      card.scrollIntoView({behavior:'smooth',block:'nearest'});
+    }
+    document.getElementById('progLbl').textContent=`Processing ${pi+1} of ${total}...`;
+
+    try {
+      const raw=await callAIWithRetry(f, 3);
+      const nn=cleanName(raw,f,i);
+      results[i]={file:f,newName:nn,err:false};
+      if(card){
+        card.className='img-card sdone';
+        badge.className='cbadge bdone'; badge.textContent='✓ DONE';
+        arrEl.classList.add('v');
+        newEl.textContent='📝 '+nn; newEl.classList.add('v');
+        msgEl.textContent='';
+        // DONE হলে কার্ড লুকাও (শুধু ERR গুলো দেখাও)
+        setTimeout(()=>{ card.style.display='none'; reorderGrid(); }, 800);
+      }
+    } catch(e) {
+      const ext=f.name.split('.').pop();
+      const fb='seo-stock-image-'+(i+1)+'.'+ext;
+      results[i]={file:f,newName:fb,err:true};
+      if(card){
+        card.className='img-card serr';
+        badge.className='cbadge berr'; badge.textContent='ERR';
+        arrEl.classList.add('v');
+        newEl.textContent='📝 '+fb; newEl.classList.add('v');
+        msgEl.textContent='⚠ '+e.message; msgEl.style.color='var(--red)';
+      }
+    }
+
+    done++;
+    const pct=Math.round(done/total*100);
+    document.getElementById('progFill').style.width=pct+'%';
+    document.getElementById('progCnt').textContent=`${done}/${total}`;
+    updateStats();
+    if(pi<pending.length-1) await new Promise(r=>setTimeout(r,900));
+  }
+
+  btn.disabled=false;
+  const errCount = Object.values(results).filter(r=>r.err).length;
+  btn.innerHTML = errCount>0 ? `🔄 ERR ${errCount}টি আবার চেষ্টা করুন` : '✨ আবার Run করুন';
+  document.getElementById('progLbl').textContent=`✅ ${done}টি সম্পন্ন!`;
+  if(Object.keys(results).length){
+    document.getElementById('btnZip').classList.add('show');
+    toast(`✅ ${done}টি সম্পন্ন! ERR: ${errCount}`, errCount>0?'err':'ok');
+  }
+}
+
+// ERR/pending কার্ড উপরে, DONE কার্ড লুকানো
+function reorderGrid(pendingIdxs) {
+  const grid = document.getElementById('imgGrid');
+  const allCards = [...grid.children];
+  // pending/ERR আগে দেখাও
+  allCards.forEach(card=>{
+    const id = parseInt(card.id.replace('card-',''));
+    const res = results[id];
+    if(!res || res.err) {
+      card.style.display='';
+      grid.prepend(card);
+    } else {
+      card.style.display='none';
+    }
+  });
+}
+
+// ═══════════════════════════════════════════
+// ZIP (STORE = no compression, original quality)
+// ═══════════════════════════════════════════
+async function makeZip() {
+  if(!Object.keys(results).length){toast('প্রথমে process করুন!','err');return;}
+  const btn=document.getElementById('btnZip');
+  btn.innerHTML='<span class="spin"></span> ZIP তৈরি হচ্ছে...';
+  try {
+    const zip=new JSZip();
+    for(const idx in results){
+      const{file,newName}=results[idx];
+      const buf=await file.arrayBuffer();
+      zip.file(newName,buf);
+    }
+    const blob=await zip.generateAsync({type:'blob',compression:'STORE'});
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(blob);
+    a.download='ROBI_Graphics_Renamed_Images.zip';
+    a.click(); URL.revokeObjectURL(a.href);
+    toast('✅ ZIP ডাউনলোড শুরু হয়েছে!','ok');
+  } catch(e){ toast('ZIP error: '+e.message,'err'); }
+  btn.innerHTML='📦 ROBI_Graphics_Renamed_Images.zip';
+}
+
+// ═══════════════════════════════════════════
+// TOAST
+// ═══════════════════════════════════════════
+function toast(msg,type='ok') {
+  const t=document.getElementById('toast');
+  t.textContent=msg; t.className=`toast on t${type}`;
+  setTimeout(()=>{t.className='toast';},4000);
+}
+</script>
+</body>
+</html>
