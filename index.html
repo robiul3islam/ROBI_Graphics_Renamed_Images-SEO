@@ -436,6 +436,36 @@
   .modal-section-label { font-family: 'Space Mono', monospace; font-size: 10px; color: var(--accent2); letter-spacing: 3px; text-transform: uppercase; margin-bottom: 8px; margin-top: 16px; display: flex; align-items: center; gap: 8px; }
   .modal-section-label::after { content:''; flex:1; height:1px; background:var(--border); }
 
+  /* SAVED API KEYS LIST */
+  .key-row {
+    display: flex; align-items: center; gap: 8px;
+    background: var(--bg2); border: 1px solid var(--border);
+    border-radius: 8px; padding: 8px 10px;
+    transition: border-color 0.2s;
+  }
+  .key-row.active { border-color: var(--green); box-shadow: 0 0 0 1px rgba(0,255,136,0.2); }
+  .key-row-text {
+    flex: 1; font-family: 'Space Mono', monospace; font-size: 12px;
+    color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .key-row-use {
+    background: var(--bg); color: var(--muted); border: 1px solid var(--border);
+    border-radius: 20px; padding: 4px 12px; font-size: 11px; font-weight: 700;
+    cursor: pointer; font-family: 'Rajdhani', sans-serif; white-space: nowrap;
+    transition: all 0.2s;
+  }
+  .key-row.active .key-row-use { background: rgba(0,255,136,0.15); color: var(--green); border-color: rgba(0,255,136,0.4); cursor: default; }
+  .key-row-use:hover:not([disabled]) { border-color: var(--accent); color: var(--accent); }
+  .key-row-del {
+    background: rgba(255,45,85,0.15); color: var(--red); border: 1px solid rgba(255,45,85,0.3);
+    border-radius: 8px; width: 28px; height: 28px; flex-shrink: 0;
+    cursor: pointer; font-size: 13px; display: flex; align-items: center; justify-content: center;
+    transition: all 0.2s;
+  }
+  .key-row-del:hover { background: rgba(255,45,85,0.3); }
+  .key-row-empty { font-size: 12px; color: var(--muted); text-align: center; padding: 10px 0; }
+
   /* THEME GRID */
   .theme-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; margin-top: 8px; }
   .theme-card {
@@ -948,14 +978,8 @@
       <button class="btn btn-pause" onclick="openHistoryModal()">🕘 History</button>
     </div>
 
-    <!-- Retry Failed Banner -->
-    <div class="retry-banner" id="retryBanner">
-      <div>
-        <div class="retry-banner-text">⚠ <span id="failedCount">0</span>টি ছবির metadata তৈরি হয়নি</div>
-        <div class="retry-banner-sub">শুধু failed ছবিগুলো আবার generate করুন। সফল ছবিগুলো একসাথে CSV-তে থাকবে।</div>
-      </div>
-      <button class="btn-retry-failed" onclick="autoRetryUntilDone()">🔄 Retry Failed (Auto)</button>
-    </div>
+    <!-- Failed items now auto-resolve silently in the background via API key rotation —
+         see autoRetryUntilDone(). No "X failed" banner is shown to the user. -->
 
     <!-- Progress -->
     <div class="progress-wrap" id="progressWrap">
@@ -1172,12 +1196,20 @@
       </select>
     </div>
     <div style="font-size:12px;color:var(--muted);margin-bottom:5px;font-family:'Space Mono',monospace;">API KEY</div>
-    <input type="password" id="apiKeyInput" placeholder="Enter your API key…" oninput="saveApiKey()">
+    <input type="password" id="apiKeyInput" placeholder="Enter your API key…" onkeydown="if(event.key==='Enter'){event.preventDefault();addKeyToList();}">
     <div style="font-size:11px;color:var(--muted);margin-top:4px;">
       <span id="keyStatus">No key saved</span>
     </div>
+    <button class="btn btn-generate" style="width:100%;justify-content:center;margin-top:10px;background:linear-gradient(135deg,#0a3d2e,#0f5c3f);" onclick="addKeyToList()">➕ এই key-টা list-এ যুক্ত করো (একাধিক key রাখতে)</button>
+
+    <div style="font-size:12px;color:var(--muted);margin:16px 0 6px;font-family:'Space Mono',monospace;">SAVED KEYS (এই provider-এর জন্য)</div>
+    <div id="savedKeysList" style="max-height:180px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;padding-right:2px;"></div>
+
+    <div style="font-size:11px;color:var(--muted);margin-top:10px;line-height:1.5;">
+      ➤ একটি key-এর rate limit/quota শেষ হলে, generation নিজে নিজে পরের key-তে switch করে যাবে — কোনো কাজ থামবে না।
+    </div>
     <div class="modal-btns">
-      <button class="btn btn-generate" style="flex:1;justify-content:center;" onclick="testKey()">🧪 Test Key</button>
+      <button class="btn btn-generate" style="flex:1;justify-content:center;" onclick="testKey()">🧪 Test Active Key</button>
       <button class="btn btn-clear" style="flex:1;justify-content:center;" onclick="closeModal()">Close</button>
     </div>
   </div>
@@ -1860,6 +1892,13 @@ let generating = false;
 let paused = false;
 let currentPlatform = 'general';
 let apiKeys = JSON.parse(localStorage.getItem('robig_keys') || '{}');
+// Migrate old single-key format (plain string) to multi-key array format
+Object.keys(apiKeys).forEach(p => {
+  if (typeof apiKeys[p] === 'string') apiKeys[p] = apiKeys[p] ? [apiKeys[p]] : [];
+  else if (!Array.isArray(apiKeys[p])) apiKeys[p] = [];
+});
+localStorage.setItem('robig_keys', JSON.stringify(apiKeys));
+let apiKeyIndex = JSON.parse(localStorage.getItem('robig_key_index') || '{}'); // provider -> index of currently-active key
 let parallelWorkers = 5;
 let outputFilename = localStorage.getItem('robig_outname') || 'robi-graphics';
 let selectedExt = 'keep'; // extension override
@@ -1932,7 +1971,7 @@ function renderHistoryList() {
       <div class="history-session-header" onclick="toggleHistorySession(${si})">
         <div class="history-session-info">
           <div class="history-session-date">📅 ${s.date} · ${s.platform?.toUpperCase() || 'GENERAL'}</div>
-          <div class="history-session-meta">${s.count} ফাইল · ${s.failedCount > 0 ? `⚠ ${s.failedCount} failed` : '✅ সব সফল'}</div>
+          <div class="history-session-meta">${s.count} ফাইল · ${s.failedCount > 0 ? `🔄 ${s.failedCount}টি retry হচ্ছিল` : '✅ সব সফল'}</div>
         </div>
         <div style="display:flex;gap:8px;align-items:center;">
           <button class="history-dl-csv-btn" onclick="event.stopPropagation();downloadHistoryCSV(${si})">📊 CSV</button>
@@ -2805,8 +2844,7 @@ function closeVectorModal() { document.getElementById('vectorModalBg').classList
 async function startGeneration() {
   if (files.length === 0) { showToast('⚠️ Please upload at least one image'); return; }
   const provider = document.getElementById('aiProvider').value;
-  const apiKey = apiKeys[provider];
-  if (!apiKey) { openModal(); showToast('⚠️ Please enter your API key first'); return; }
+  if (getKeysArr(provider).length === 0) { openModal(); showToast('⚠️ Please enter your API key first'); return; }
 
   generating = true; paused = false;
   document.getElementById('generateBtn').disabled = true;
@@ -2884,7 +2922,7 @@ async function startGeneration() {
         if (pFill) pFill.style.width = '60%';
         const prompt = buildPrompt(titleLen, descLen, kwCount, currentPlatform);
         const fullPromptUsed = textContext ? `${textContext}\n\n${'─'.repeat(40)}\n\n${prompt}` : prompt;
-        const metadata = await callAI(provider, apiKey, base64, mimeType, prompt, textContext);
+        const metadata = await callAIWithKeyRotation(provider, base64, mimeType, prompt, textContext);
         const previewSrc = base64
           ? `data:image/jpeg;base64,${base64}`
           : (filePreviewMap[key] || null);
@@ -2936,21 +2974,17 @@ async function startGeneration() {
   saveToHistory(results);
 
   const failed = results.filter(r => r.metadata?.error);
-  const retryBanner = document.getElementById('retryBanner');
 
   if (failed.length > 0) {
-    document.getElementById('failedCount').textContent = failed.length;
-    retryBanner.classList.add('show');
-    // Keep only failed files in the dropzone
+    // Keep only failed files in the dropzone so background retry can find them
     const failedFileNames = new Set(failed.map(r => r.file.name + r.file.size));
     files = files.filter(f => failedFileNames.has(f.name + f.size));
     renderPreviews();
     document.getElementById('fileCount').textContent = files.length;
-    showToast(`⚠ ${failed.length}টি failed — auto retry শুরু হচ্ছে 3 সেকেন্ডে…`);
-    // Auto retry failed items — when all succeed, CSV will auto-download
-    setTimeout(() => autoRetryUntilDone(), 3000);
+    showToast(`🔄 প্রসেসিং চলছে — key rotate করে সব সফল করার চেষ্টা হচ্ছে…`);
+    // Silently auto retry with key rotation until everything succeeds — no "failed" message shown
+    setTimeout(() => autoRetryUntilDone(), 1500);
   } else {
-    retryBanner.classList.remove('show');
     // All succeeded — clear dropzone and download CSV
     files = [];
     filePreviewMap = {};
@@ -2962,9 +2996,11 @@ async function startGeneration() {
   }
 }
 
-// ===== AUTO RETRY UNTIL ALL SUCCEED THEN CSV =====
-async function autoRetryUntilDone() {
-  const MAX_ROUNDS = 5; // maximum retry attempts
+// ===== SILENT AUTO RETRY (KEY ROTATION) UNTIL ALL SUCCEED, THEN CSV =====
+async function autoRetryUntilDone(superRound) {
+  superRound = superRound || 0;
+  const MAX_ROUNDS = 10; // retry rounds per pass
+  const MAX_SUPER_ROUNDS = 4; // how many times we restart the whole pass if still stuck
   let round = 0;
 
   while (round < MAX_ROUNDS) {
@@ -2973,11 +3009,7 @@ async function autoRetryUntilDone() {
 
     round++;
     const provider = document.getElementById('aiProvider').value;
-    const apiKey = apiKeys[provider];
-    if (!apiKey) break;
-
-    showToast(`🔄 Auto retry ${round}/${MAX_ROUNDS} — ${stillFailed.length}টি ফাইল…`);
-    document.getElementById('failedCount').textContent = stillFailed.length;
+    if (getKeysArr(provider).length === 0) break;
 
     const titleLen = document.querySelector('input[oninput*="titleVal"]').value;
     const descLen  = document.querySelector('input[oninput*="descVal"]').value;
@@ -3005,7 +3037,7 @@ async function autoRetryUntilDone() {
           base64 = await fileToBase64(item.file);
           mimeType = item.file.type;
         }
-        const metadata = await callAI(provider, apiKey, base64, mimeType, prompt, textContext);
+        const metadata = await callAIWithKeyRotation(provider, base64, mimeType, prompt, textContext);
         const previewSrc = base64 ? `data:image/jpeg;base64,${base64}` : (filePreviewMap[key] || null);
         results[idx].metadata = metadata;
         results[idx].base64 = base64;
@@ -3021,18 +3053,16 @@ async function autoRetryUntilDone() {
     }
 
     const remaining = results.filter(r => r.metadata?.error);
-    document.getElementById('failedCount').textContent = remaining.length;
     if (remaining.length === 0) break;
-    // Wait before next round
-    await sleep(1200);
+    // Wait before next round — key limits often reset within a minute
+    await sleep(1500);
   }
 
   const finalFailed = results.filter(r => r.metadata?.error);
   saveToHistory(results);
 
   if (finalFailed.length === 0) {
-    // All done — hide retry banner, clear dropzone, download CSV
-    document.getElementById('retryBanner').classList.remove('show');
+    // All done — clear dropzone, download CSV
     files = [];
     filePreviewMap = {};
     fileMetaMap = {};
@@ -3040,9 +3070,12 @@ async function autoRetryUntilDone() {
     document.getElementById('fileCount').textContent = '0';
     showToast(`✅ সব সফল! CSV ডাউনলোড হচ্ছে…`);
     setTimeout(() => { exportCSV(); }, 600);
+  } else if (superRound < MAX_SUPER_ROUNDS) {
+    // Still some left — keep trying silently in the background, longer pause this time
+    setTimeout(() => autoRetryUntilDone(superRound + 1), 8000);
   } else {
-    document.getElementById('failedCount').textContent = finalFailed.length;
-    showToast(`⚠ ${finalFailed.length}টি এখনো failed — manual retry করুন`);
+    // Truly exhausted every key across many rounds — most likely all keys are invalid/expired
+    showToast(`⚠️ সব saved key দিয়েও কাজ হচ্ছে না — নতুন/সঠিক API key যোগ করুন`);
   }
 }
 
@@ -3229,6 +3262,65 @@ Return ONLY this exact valid JSON — no markdown, no explanation, nothing else:
 }
 
 // ===== UNIVERSAL AI API CALL =====
+// ===== MULTI API KEY HELPERS =====
+function getKeysArr(provider) {
+  const arr = apiKeys[provider];
+  if (!arr) return [];
+  return Array.isArray(arr) ? arr.filter(Boolean) : (arr ? [arr] : []);
+}
+function getActiveKeyIndex(provider) {
+  const arr = getKeysArr(provider);
+  let idx = apiKeyIndex[provider] || 0;
+  if (idx >= arr.length) idx = 0;
+  return idx;
+}
+function setActiveKeyIndex(provider, idx) {
+  apiKeyIndex[provider] = idx;
+  localStorage.setItem('robig_key_index', JSON.stringify(apiKeyIndex));
+}
+function isRateLimitOrQuotaError(err) {
+  const msg = (err && err.message ? String(err.message) : '').toLowerCase();
+  return msg.includes('429') || msg.includes('quota') || msg.includes('rate limit') ||
+         msg.includes('rate_limit') || msg.includes('resource_exhausted') ||
+         msg.includes('too many requests') || msg.includes('insufficient_quota') ||
+         msg.includes('exceeded');
+}
+// Calls the AI, automatically rotating to the next saved API key for this
+// provider if the current one has hit its rate limit / quota. All other
+// call sites should use this instead of calling callAI() directly.
+// If EVERY saved key is rate-limited at the same time, it waits (backoff)
+// and cycles through all the keys again — up to KEY_ROTATION_MAX_ROUNDS
+// times — so a temporary limit on all keys still resolves into a success
+// instead of an error, as long as at least one key is valid.
+const KEY_ROTATION_MAX_ROUNDS = 8;
+async function callAIWithKeyRotation(provider, base64, mimeType, prompt, textContext) {
+  const keysArr = getKeysArr(provider);
+  if (keysArr.length === 0) throw new Error('No API key set for ' + provider);
+  let lastErr = null;
+  for (let round = 0; round < KEY_ROTATION_MAX_ROUNDS; round++) {
+    const startIdx = getActiveKeyIndex(provider);
+    for (let attempt = 0; attempt < keysArr.length; attempt++) {
+      const idx = (startIdx + attempt) % keysArr.length;
+      const key = keysArr[idx];
+      try {
+        const result = await callAI(provider, key, base64, mimeType, prompt, textContext);
+        setActiveKeyIndex(provider, idx); // remember this key as the working one
+        return result;
+      } catch (err) {
+        lastErr = err;
+        if (isRateLimitOrQuotaError(err) && keysArr.length > 0) {
+          setActiveKeyIndex(provider, (idx + 1) % keysArr.length);
+          continue; // limit hit — auto switch to next key
+        }
+        throw err; // non-limit error, don't rotate, fail fast
+      }
+    }
+    // Every key hit its limit in this pass — wait a bit and cycle through all keys again
+    if (round < KEY_ROTATION_MAX_ROUNDS - 1) await sleep(Math.min(2000 * (round + 1), 15000));
+  }
+  throw lastErr;
+}
+
 async function callAI(provider, apiKey, base64, mimeType, prompt, textContext) {
   const model = getSelectedModel();
 
@@ -3748,8 +3840,7 @@ function findAndReplaceAll() {
 
 async function regenResult(idx) {
   const provider = document.getElementById('aiProvider').value;
-  const apiKey = apiKeys[provider];
-  if (!apiKey) { showToast('⚠️ API key required'); return; }
+  if (getKeysArr(provider).length === 0) { showToast('⚠️ API key required'); return; }
   const item = results[idx];
   showToast('🔄 Regenerating...');
   const titleLen = document.querySelector('input[oninput*="titleVal"]').value;
@@ -3757,7 +3848,7 @@ async function regenResult(idx) {
   const kwCount  = document.querySelector('input[oninput*="kwVal"]').value;
   const prompt = buildPrompt(titleLen, descLen, kwCount, currentPlatform);
   try {
-    const metadata = await callAI(provider, apiKey, item.base64, item.mimeType, prompt);
+    const metadata = await callAIWithKeyRotation(provider, item.base64, item.mimeType, prompt);
     results[idx].metadata = metadata;
     results[idx].promptUsed = prompt;
     document.getElementById(`result-${idx}`)?.remove();
@@ -4072,25 +4163,67 @@ function openModal() {
 }
 function closeModal() { document.getElementById('modalBg').classList.remove('show'); }
 function updateModalKey() {
+  document.getElementById('apiKeyInput').value = '';
+  renderSavedKeysList();
+}
+function maskKey(key) {
+  if (key.length <= 10) return key[0] + '•'.repeat(Math.max(3, key.length - 2)) + key.slice(-1);
+  return key.slice(0, 4) + '•'.repeat(6) + key.slice(-4);
+}
+function renderSavedKeysList() {
+  const p = document.getElementById('modalProvider').value;
+  const keysArr = getKeysArr(p);
+  const activeIdx = getActiveKeyIndex(p);
+  const list = document.getElementById('savedKeysList');
+
+  document.getElementById('keyStatus').textContent = keysArr.length
+    ? `✅ ${keysArr.length}টি key saved (active: #${activeIdx + 1})`
+    : '⚠ No key saved';
+
+  if (keysArr.length === 0) {
+    list.innerHTML = `<div class="key-row-empty">এখনো কোনো key যুক্ত করা হয়নি</div>`;
+    return;
+  }
+  list.innerHTML = keysArr.map((k, i) => `
+    <div class="key-row ${i === activeIdx ? 'active' : ''}">
+      <div class="key-row-text">${maskKey(k)} ${i === activeIdx ? '✅' : ''}</div>
+      <button class="key-row-use" ${i === activeIdx ? 'disabled' : ''} onclick="useKey('${p}', ${i})">${i === activeIdx ? 'Active' : 'Use'}</button>
+      <button class="key-row-del" onclick="deleteKey('${p}', ${i})" title="Delete">🗑</button>
+    </div>
+  `).join('');
+}
+function addKeyToList() {
   const p = document.getElementById('modalProvider').value;
   const input = document.getElementById('apiKeyInput');
-  input.value = apiKeys[p] || '';
-  document.getElementById('keyStatus').textContent = apiKeys[p] ? '✅ Key saved' : '⚠ No key saved';
-}
-function saveApiKey() {
-  const p = document.getElementById('modalProvider').value;
-  const v = document.getElementById('apiKeyInput').value.trim();
-  if (v) {
-    apiKeys[p] = v;
-  } else {
-    delete apiKeys[p];
-  }
+  const v = input.value.trim();
+  if (!v) { showToast('⚠️ আগে একটা key লিখুন'); return; }
+  const keysArr = getKeysArr(p);
+  if (keysArr.includes(v)) { showToast('⚠️ এই key আগে থেকেই আছে'); return; }
+  keysArr.push(v);
+  apiKeys[p] = keysArr;
   localStorage.setItem('robig_keys', JSON.stringify(apiKeys));
-  document.getElementById('keyStatus').textContent = v ? '✅ Key saved' : '⚠ No key saved';
+  input.value = '';
+  renderSavedKeysList();
+  showToast(`✅ Key যুক্ত হয়েছে! মোট ${keysArr.length}টি`);
+}
+function useKey(p, idx) {
+  setActiveKeyIndex(p, idx);
+  renderSavedKeysList();
+  showToast(`✅ Key #${idx + 1} এখন active`);
+}
+function deleteKey(p, idx) {
+  const keysArr = getKeysArr(p);
+  keysArr.splice(idx, 1);
+  apiKeys[p] = keysArr;
+  localStorage.setItem('robig_keys', JSON.stringify(apiKeys));
+  const activeIdx = getActiveKeyIndex(p);
+  if (activeIdx >= keysArr.length) setActiveKeyIndex(p, 0);
+  renderSavedKeysList();
+  showToast('🗑 Key মুছে ফেলা হয়েছে');
 }
 async function testKey() {
   const p = document.getElementById('modalProvider').value;
-  const key = apiKeys[p];
+  const key = getKeysArr(p)[getActiveKeyIndex(p)];
   if (!key) { showToast('⚠️ Enter a key first'); return; }
   showToast('🧪 Testing key...');
   try {
@@ -4119,8 +4252,7 @@ async function retryFailed() {
   const failed = results.filter(r => r.metadata?.error);
   if (failed.length === 0) { showToast('✅ কোনো failed item নেই!'); return; }
   const provider = document.getElementById('aiProvider').value;
-  const apiKey = apiKeys[provider];
-  if (!apiKey) { openModal(); showToast('⚠️ API key দিন'); return; }
+  if (getKeysArr(provider).length === 0) { openModal(); showToast('⚠️ API key দিন'); return; }
 
   showToast(`🔄 ${failed.length}টি failed item retry করছি…`);
   const titleLen = document.querySelector('input[oninput*="titleVal"]').value;
@@ -4149,7 +4281,7 @@ async function retryFailed() {
           base64 = await fileToBase64(item.file); mimeType = item.file.type;
         }
       }
-      const metadata = await callAI(provider, apiKey, base64, mimeType, prompt, textContext);
+      const metadata = await callAIWithKeyRotation(provider, base64, mimeType, prompt, textContext);
       results[idx].metadata = metadata;
       results[idx].base64 = base64;
       results[idx].mimeType = mimeType;
@@ -4167,7 +4299,6 @@ async function retryFailed() {
   saveToHistory(results);
 
   if (stillFailed.length === 0) {
-    document.getElementById('retryBanner').classList.remove('show');
     files = [];
     filePreviewMap = {};
     fileMetaMap = {};
@@ -4176,13 +4307,12 @@ async function retryFailed() {
     showToast(`✅ সব ${retried}টি সফল! CSV ডাউনলোড হচ্ছে…`);
     setTimeout(() => { exportCSV(); }, 600);
   } else {
-    document.getElementById('failedCount').textContent = stillFailed.length;
     const stillFailedNames = new Set(stillFailed.map(r => r.file.name + r.file.size));
     files = files.filter(f => stillFailedNames.has(f.name + f.size));
     renderPreviews();
     document.getElementById('fileCount').textContent = files.length;
-    showToast(`⚠ ${retried}টি সফল, ${stillFailed.length}টি এখনো failed — auto retry হচ্ছে…`);
-    setTimeout(() => autoRetryUntilDone(), 3000);
+    showToast(`🔄 প্রসেসিং চলছে — key rotate করে সব সফল করার চেষ্টা হচ্ছে…`);
+    setTimeout(() => autoRetryUntilDone(), 1500);
   }
 }
 function saveSettings() { showToast('💾 Settings saved!'); }
@@ -4374,8 +4504,7 @@ Return ONLY this exact valid JSON — no markdown, no explanation, nothing else:
 async function startPromptGeneration() {
   if (promptFiles.length === 0) { showToast('⚠️ আগে image upload করুন'); return; }
   const provider = document.getElementById('aiProvider').value;
-  const apiKey = apiKeys[provider];
-  if (!apiKey) { openModal(); showToast('⚠️ API key দিন'); return; }
+  if (getKeysArr(provider).length === 0) { openModal(); showToast('⚠️ API key দিন'); return; }
 
   const targetTool = document.getElementById('promptTargetTool').value;
   const style = document.getElementById('promptStyle').value;
@@ -4402,7 +4531,7 @@ async function startPromptGeneration() {
     await Promise.all(batch.map(async (f) => {
       try {
         const base64 = await compressImageFile(f, 1200, 0.85);
-        const aiResponse = await callAI(provider, apiKey, base64, 'image/jpeg', instruction, null);
+        const aiResponse = await callAIWithKeyRotation(provider, base64, 'image/jpeg', instruction, null);
         const previewSrc = `data:image/jpeg;base64,${base64}`;
         const result = {
           file: f,
