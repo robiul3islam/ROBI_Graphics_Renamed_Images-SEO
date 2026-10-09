@@ -3199,6 +3199,10 @@ Never choose categories that are unrelated to the visible image.
 KEYWORD RULES:
 Generate exactly ${kwCount} highly relevant keywords, ranked in 3 tiers (most important first — order matters for search ranking):
 
+KEYWORD UNIQUENESS RULE (VERY IMPORTANT):
+- Every keyword must appear ONLY ONCE — no duplicates, no repeated words in different case, no near-identical variants (e.g. "icon" and "icons").
+- If you run out of ideas, add NEW design-related keywords instead of repeating one, until you reach the exact count.
+
 KEYWORD ORDER RULE (VERY IMPORTANT):
 - ALL single-word keywords (exactly ONE word, no spaces) must come FIRST in the keywords array — the first block of the list is single words only.
 - Only AFTER all single words, list the multi-word phrases (2-3 words).
@@ -3310,6 +3314,10 @@ Related style descriptors, color names (only visible colors), composition terms,
 **TIER 3 — ACTUAL/LONG-TAIL keywords (final ~30% of ${kwCount}):**
 Specific use-case phrases, industry/niche terms, longer descriptive combinations (2-3 word phrases), and highly specific details that a buyer with a precise need would search for. These capture niche, lower-competition searches that convert well.
 
+KEYWORD UNIQUENESS RULE (VERY IMPORTANT):
+- Every keyword must appear ONLY ONCE — no duplicates, no repeated words in different case, no near-identical variants (e.g. "icon" and "icons").
+- If you run out of ideas, add NEW design-related keywords instead of repeating one, until you reach the exact count.
+
 KEYWORD ORDER RULE (VERY IMPORTANT):
 - ALL single-word keywords (exactly ONE word, no spaces) must come FIRST in the keywords array — the first block of the list is single words only.
 - Only AFTER all single words, list the multi-word phrases (2-3 words).
@@ -3380,7 +3388,39 @@ function isRateLimitOrQuotaError(err) {
 // times — so a temporary limit on all keys still resolves into a success
 // instead of an error, as long as at least one key is valid.
 const KEY_ROTATION_MAX_ROUNDS = 8;
+// Wrapper: removes duplicate keywords, then asks the AI for NEW design-related keywords to refill the removed slots
 async function callAIWithKeyRotation(provider, base64, mimeType, prompt, textContext) {
+  const metadata = await _callAIRotating(provider, base64, mimeType, prompt, textContext);
+  try {
+    const m = prompt.match(/exactly (\d+)(?: highly relevant)? keywords/i);
+    const target = m ? parseInt(m[1], 10) : 0;
+    if (!target || !metadata || !metadata.keywords) return metadata;
+    const rawCount = Array.isArray(metadata.keywords) ? metadata.keywords.length : 0;
+    let kws = reorderSingleKeywordsFirst(metadata.keywords) || [];
+    for (let tries = 0; tries < 2 && kws.length < target; tries++) {
+      const need = target - kws.length;
+      const topUpPrompt = `You are adding keywords for a stock-marketplace design file (look at the file/context provided).
+These keywords are ALREADY used — do NOT repeat them or give near-identical versions:
+${JSON.stringify(kws)}
+
+Give exactly ${need} NEW, different keywords that are closely related to this design (subject, style, usage, concept, visible elements, buyer search terms).
+Rules: every keyword unique (case-insensitive), no brand/celebrity/trademark names, nothing that is not visible or relevant, single words or short phrases (2-3 words).
+Return ONLY valid JSON, no markdown: {"keywords": ["...", "..."]}`;
+      let extra;
+      try { extra = await _callAIRotating(provider, base64, mimeType, topUpPrompt, textContext); }
+      catch (e) { break; }
+      if (!extra || !extra.keywords) break;
+      const merged = reorderSingleKeywordsFirst([].concat(kws, extra.keywords));
+      if (merged.length <= kws.length) break; // nothing new came back
+      kws = merged;
+    }
+    if (kws.length > target) kws = kws.slice(0, target);
+    metadata.keywords = kws;
+  } catch (e) {}
+  return metadata;
+}
+
+async function _callAIRotating(provider, base64, mimeType, prompt, textContext) {
   const keysArr = getKeysArr(provider);
   if (keysArr.length === 0) throw new Error('No API key set for ' + provider);
   let lastErr = null;
@@ -3636,7 +3676,16 @@ async function callGrok(apiKey, base64, mimeType, prompt, model) {
 function reorderSingleKeywordsFirst(kws) {
   if (typeof kws === 'string') kws = kws.split(/[,\n;]+/);
   if (!Array.isArray(kws)) return kws;
-  const clean = kws.map(k => String(k).replace(/\s+/g, ' ').trim()).filter(Boolean);
+  const seen = new Set();
+  const clean = [];
+  kws.forEach(k => {
+    const t = String(k).replace(/\s+/g, ' ').trim();
+    if (!t) return;
+    const id = t.toLowerCase().replace(/[-_]+/g, ' ').replace(/[^\p{L}\p{N} ]/gu, '').trim();
+    if (!id || seen.has(id)) return;   // duplicate keyword → keep only the first one
+    seen.add(id);
+    clean.push(t);
+  });
   const singles = clean.filter(k => !/\s/.test(k));
   const phrases = clean.filter(k => /\s/.test(k));
   return singles.concat(phrases);
