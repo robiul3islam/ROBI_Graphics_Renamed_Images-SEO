@@ -1891,14 +1891,87 @@ let results = [];
 let generating = false;
 let paused = false;
 let currentPlatform = 'general';
-let apiKeys = JSON.parse(localStorage.getItem('robig_keys') || '{}');
-// Migrate old single-key format (plain string) to multi-key array format
-Object.keys(apiKeys).forEach(p => {
-  if (typeof apiKeys[p] === 'string') apiKeys[p] = apiKeys[p] ? [apiKeys[p]] : [];
-  else if (!Array.isArray(apiKeys[p])) apiKeys[p] = [];
+// ===== ROBUST API KEY STORAGE =====
+// Keys are saved in 3 places (localStorage, a backup localStorage slot, IndexedDB)
+// so they never come back empty after reload / storage-full / cleanup.
+function _lsGetJSON(k) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : null; } catch(e) { return null; } }
+function _idbOpen() {
+  return new Promise((res, rej) => {
+    try {
+      const r = indexedDB.open('robig_store', 1);
+      r.onupgradeneeded = () => r.result.createObjectStore('kv');
+      r.onsuccess = () => res(r.result);
+      r.onerror = () => rej(r.error);
+    } catch(e) { rej(e); }
+  });
+}
+async function _idbSet(k, v) {
+  try {
+    const db = await _idbOpen();
+    await new Promise((res, rej) => { const tx = db.transaction('kv', 'readwrite'); tx.objectStore('kv').put(v, k); tx.oncomplete = res; tx.onerror = () => rej(tx.error); });
+  } catch(e) {}
+}
+async function _idbGet(k) {
+  try {
+    const db = await _idbOpen();
+    return await new Promise((res, rej) => { const tx = db.transaction('kv', 'readonly'); const rq = tx.objectStore('kv').get(k); rq.onsuccess = () => res(rq.result); rq.onerror = () => rej(rq.error); });
+  } catch(e) { return null; }
+}
+function _normalizeKeys(obj) {
+  const out = {};
+  if (!obj || typeof obj !== 'object') return out;
+  Object.keys(obj).forEach(p => {
+    const v = obj[p];
+    if (typeof v === 'string') { if (v) out[p] = [v]; }
+    else if (Array.isArray(v)) { const a = v.filter(x => typeof x === 'string' && x); if (a.length) out[p] = a; }
+  });
+  return out;
+}
+function _hasAnyKey(obj) { return Object.keys(obj || {}).some(p => Array.isArray(obj[p]) && obj[p].length); }
+
+let apiKeys = _normalizeKeys(_lsGetJSON('robig_keys'));
+if (!_hasAnyKey(apiKeys)) apiKeys = _normalizeKeys(_lsGetJSON('robig_keys_bak'));
+let apiKeyIndex = _lsGetJSON('robig_key_index') || {}; // provider -> index of currently-active key
+
+function persistKeys() {
+  const json = JSON.stringify(apiKeys);
+  const idxJson = JSON.stringify(apiKeyIndex);
+  const write = () => {
+    localStorage.setItem('robig_keys', json);
+    localStorage.setItem('robig_keys_bak', json);
+    localStorage.setItem('robig_key_index', idxJson);
+  };
+  try { write(); }
+  catch(e) {
+    // Storage full — free space by dropping bulky history (it holds image previews), then retry
+    try { localStorage.removeItem('robig_history'); if (typeof sessionHistory !== 'undefined') sessionHistory = []; write(); } catch(e2) {}
+  }
+  _idbSet('robig_keys', json);
+  _idbSet('robig_key_index', idxJson);
+}
+// Only write if we actually have keys — never overwrite saved keys with an empty object on page load
+if (_hasAnyKey(apiKeys)) persistKeys();
+// If localStorage was wiped (browser cleanup, file:// quirks), restore keys from IndexedDB
+(async function restoreKeysFromIDB() {
+  if (_hasAnyKey(apiKeys)) return;
+  try {
+    const raw = await _idbGet('robig_keys');
+    const restored = _normalizeKeys(raw ? JSON.parse(raw) : null);
+    if (_hasAnyKey(restored)) {
+      apiKeys = restored;
+      const ri = await _idbGet('robig_key_index');
+      try { if (ri) apiKeyIndex = JSON.parse(ri) || {}; } catch(e) {}
+      persistKeys();
+      if (typeof renderSavedKeysList === 'function' && document.getElementById('savedKeysList')) { try { renderSavedKeysList(); } catch(e) {} }
+    }
+  } catch(e) {}
+})();
+// Ask the browser not to auto-delete this site's storage
+try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch(e) {}
+// Keep multiple tabs in sync so one tab never overwrites another tab's keys with stale data
+window.addEventListener('storage', ev => {
+  if (ev.key === 'robig_keys' && ev.newValue) { const n = _normalizeKeys(_lsGetJSON('robig_keys')); if (_hasAnyKey(n)) apiKeys = n; }
 });
-localStorage.setItem('robig_keys', JSON.stringify(apiKeys));
-let apiKeyIndex = JSON.parse(localStorage.getItem('robig_key_index') || '{}'); // provider -> index of currently-active key
 let parallelWorkers = 5;
 let outputFilename = localStorage.getItem('robig_outname') || 'robi-graphics';
 let selectedExt = 'keep'; // extension override
@@ -1918,7 +1991,7 @@ function isBannedKeyword(kw) {
 }
 
 // ===== HISTORY =====
-let sessionHistory = JSON.parse(localStorage.getItem('robig_history') || '[]');
+let sessionHistory = _lsGetJSON('robig_history') || [];
 
 function saveToHistory(sessionResults) {
   const session = {
@@ -1935,7 +2008,7 @@ function saveToHistory(sessionResults) {
       category: r.metadata?.category || '',
       category_number: r.metadata?.category_number || '',
       error: r.metadata?.error || null,
-      previewSrc: r.previewSrc || null,
+      previewSrc: (r.previewSrc && r.previewSrc.length < 15000) ? r.previewSrc : null, // keep storage small so API keys always fit
     }))
   };
   sessionHistory.unshift(session);
@@ -3126,6 +3199,13 @@ Never choose categories that are unrelated to the visible image.
 KEYWORD RULES:
 Generate exactly ${kwCount} highly relevant keywords, ranked in 3 tiers (most important first — order matters for search ranking):
 
+KEYWORD ORDER RULE (VERY IMPORTANT):
+- ALL single-word keywords (exactly ONE word, no spaces) must come FIRST in the keywords array — the first block of the list is single words only.
+- Only AFTER all single words, list the multi-word phrases (2-3 words).
+- Inside the single-word group, keep the tier order (Tier 1 best → Tier 2 supporting → Tier 3 specific).
+- Inside the phrase group, also keep the tier order (best → supporting → long-tail).
+
+
 TIER 1 — BEST keywords (first ~35%):
 The strongest, highest-search-volume terms — main subject + most defining style trait. These are what buyers type first.
 
@@ -3230,6 +3310,12 @@ Related style descriptors, color names (only visible colors), composition terms,
 **TIER 3 — ACTUAL/LONG-TAIL keywords (final ~30% of ${kwCount}):**
 Specific use-case phrases, industry/niche terms, longer descriptive combinations (2-3 word phrases), and highly specific details that a buyer with a precise need would search for. These capture niche, lower-competition searches that convert well.
 
+KEYWORD ORDER RULE (VERY IMPORTANT):
+- ALL single-word keywords (exactly ONE word, no spaces) must come FIRST in the keywords array — the first block of the list is single words only.
+- Only AFTER all single words, list the multi-word phrases (2-3 words).
+- Inside the single-word group, keep the tier order (Tier 1 best → Tier 2 supporting → Tier 3 specific).
+- Inside the phrase group, also keep the tier order (best → supporting → long-tail).
+
 Strict keyword requirements:
 - No duplicates (case-insensitive)
 - No brand names, no celebrity names, no trademarked terms
@@ -3276,7 +3362,8 @@ function getActiveKeyIndex(provider) {
 }
 function setActiveKeyIndex(provider, idx) {
   apiKeyIndex[provider] = idx;
-  localStorage.setItem('robig_key_index', JSON.stringify(apiKeyIndex));
+  try { localStorage.setItem('robig_key_index', JSON.stringify(apiKeyIndex)); } catch(e) {}
+  _idbSet('robig_key_index', JSON.stringify(apiKeyIndex));
 }
 function isRateLimitOrQuotaError(err) {
   const msg = (err && err.message ? String(err.message) : '').toLowerCase();
@@ -3544,14 +3631,27 @@ async function callGrok(apiKey, base64, mimeType, prompt, model) {
   return parseJSON(data.choices?.[0]?.message?.content || '');
 }
 
+// Single-word keywords go FIRST; multi-word phrases follow.
+// Inside each group the original AI order (Tier 1 → Tier 2 → Tier 3) is kept exactly as is.
+function reorderSingleKeywordsFirst(kws) {
+  if (typeof kws === 'string') kws = kws.split(/[,\n;]+/);
+  if (!Array.isArray(kws)) return kws;
+  const clean = kws.map(k => String(k).replace(/\s+/g, ' ').trim()).filter(Boolean);
+  const singles = clean.filter(k => !/\s/.test(k));
+  const phrases = clean.filter(k => /\s/.test(k));
+  return singles.concat(phrases);
+}
 function parseJSON(text) {
   const clean = text.replace(/```json|```/g, '').trim();
-  try { return JSON.parse(clean); }
+  let obj;
+  try { obj = JSON.parse(clean); }
   catch {
     const match = clean.match(/\{[\s\S]*\}/);
-    if (match) return JSON.parse(match[0]);
-    throw new Error('Failed to parse AI response as JSON');
+    if (match) obj = JSON.parse(match[0]);
+    else throw new Error('Failed to parse AI response as JSON');
   }
+  if (obj && obj.keywords) obj.keywords = reorderSingleKeywordsFirst(obj.keywords);
+  return obj;
 }
 
 // ===== RENDER RESULT =====
@@ -3571,6 +3671,7 @@ function renderResult(item, idx) {
   const imgSrc = item.previewSrc
     ? item.previewSrc
     : (item.base64 && item.mimeType && !isRawVector ? `data:${item.mimeType};base64,${item.base64}` : '');
+  if (md.keywords && !md.error) md.keywords = reorderSingleKeywordsFirst(md.keywords);
   const kws = Array.isArray(md.keywords) ? md.keywords : [];
   const catName = md.category || '';
   const catNum  = md.category_number || '';
@@ -3805,7 +3906,7 @@ function findAndReplaceAll() {
           newKws.push(k);
         }
       });
-      if (changed) r.metadata.keywords = newKws;
+      if (changed) r.metadata.keywords = reorderSingleKeywordsFirst(newKws);
     }
 
     if (scope === 'title' || scope === 'all') {
@@ -4201,7 +4302,7 @@ function addKeyToList() {
   if (keysArr.includes(v)) { showToast('⚠️ এই key আগে থেকেই আছে'); return; }
   keysArr.push(v);
   apiKeys[p] = keysArr;
-  localStorage.setItem('robig_keys', JSON.stringify(apiKeys));
+  persistKeys();
   input.value = '';
   renderSavedKeysList();
   showToast(`✅ Key যুক্ত হয়েছে! মোট ${keysArr.length}টি`);
@@ -4215,7 +4316,7 @@ function deleteKey(p, idx) {
   const keysArr = getKeysArr(p);
   keysArr.splice(idx, 1);
   apiKeys[p] = keysArr;
-  localStorage.setItem('robig_keys', JSON.stringify(apiKeys));
+  persistKeys();
   const activeIdx = getActiveKeyIndex(p);
   if (activeIdx >= keysArr.length) setActiveKeyIndex(p, 0);
   renderSavedKeysList();
